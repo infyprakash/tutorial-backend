@@ -38,12 +38,7 @@ app.include_router(nec_router.router)
 # app.include_router(coursecontent_router.router)
 
 origins = [
-    "http://localhost.tiangolo.com",
-    "https://localhost.tiangolo.com",
-    "http://localhost",
-    "http://localhost:8080",
-    "http://localhost:3000",
-    "http://192.168.101.9:3000"
+    "https://ezexplanation.com"
 ]
 
 app.add_middleware(
