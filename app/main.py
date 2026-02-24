@@ -38,9 +38,10 @@ app.include_router(nec_router.router)
 # app.include_router(coursecontent_router.router)
 
 origins = [
-    "https://ezexplanation.com",   
-    "http://localhost:3000",       
-    "http://127.0.0.1:3000",       
+    "https://ezexplanation.com",
+    "https://www.ezexplanation.com",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
 
 app.add_middleware(
