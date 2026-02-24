@@ -43,7 +43,6 @@ fonttools==4.38.0
 fqdn==1.5.1
 frozendict==2.3.5
 gast==0.4.0
-google-auth==2.22.0
 google-auth-oauthlib==1.0.0
 google-pasta==0.2.0
 grpcio==1.56.2
@@ -171,7 +170,6 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 uri-template==1.2.0
 uritemplate==4.1.1
-urllib3==2.5.0
 uv==0.10.2
 virtualenv==20.16.3
 wcwidth==0.2.5
