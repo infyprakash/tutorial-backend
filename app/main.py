@@ -22,8 +22,8 @@ async def lifespan(app:FastAPI):
     print("Starting up..........")
     print("creating database and tables................")
     # from app.models import Course,Chapter,SubChapter,CourseContent
-    from app.tutorial.models import Course,Chapter,SubChapter,CourseContent
-    SQLModel.metadata.create_all(engine)
+    # from app.tutorial.models import Course,Chapter,SubChapter,CourseContent
+    # SQLModel.metadata.create_all(engine)
     yield
     print("Shutting down........")
 
