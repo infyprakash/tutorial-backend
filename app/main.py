@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.tutorial import routers as tutorial_router
 from app.account import routers as account_router
+from app.neclicense import router as nec_router
 
 from app.dependencies import get_token_header
 
@@ -29,6 +30,7 @@ async def lifespan(app:FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(tutorial_router.router)
 app.include_router(account_router.router)
+app.include_router(nec_router.router)
 
 # app.include_router(course_router.router)
 # app.include_router(chapter_router.router)
@@ -40,7 +42,8 @@ origins = [
     "https://localhost.tiangolo.com",
     "http://localhost",
     "http://localhost:8080",
-    "http://localhost:3000"
+    "http://localhost:3000",
+    "http://192.168.101.9:3000"
 ]
 
 app.add_middleware(

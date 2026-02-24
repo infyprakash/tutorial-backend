@@ -6,6 +6,7 @@ from app.tutorial.schema import *
 # from app.schema import ChapterRead
 from app.database import get_session
 from sqlmodel import Session,select
+from sqlalchemy.orm import selectinload
 
 from app.dependencies import get_token_header
 from fastapi.security import OAuth2PasswordBearer
@@ -32,9 +33,29 @@ def get_courses(session:Session=Depends(get_session))->List[CourseRead]:
     results = session.exec(statement=statement).all()
     return results
 
+@router.get("/courses/sitemap")
+def get_courses_sitemap(session:Session=Depends(get_session))->List[CourseNested]:
+    statement = select(Course)
+    results = session.exec(statement=statement).all()
+    return results
+
+@router.get("/courses/sitemap/{course_slug}")
+def get_courses_sitemap(course_slug:str,session:Session=Depends(get_session))->CourseNested:
+    statement = select(Course).where(Course.slug==course_slug)
+    results = session.exec(statement=statement).first()
+    return results
+
 @router.get("/courses/{course_id}")
 def get_course_detail(course_id:int,session:Session=Depends(get_session))->CourseRead:
     statement = select(Course).where(Course.id == course_id)
+    result = session.exec(statement=statement).first()
+    if not result:
+        raise HTTPException(status_code=404, detail="Course not found")
+    return result
+
+@router.get("/courses/detail/{course_slug}")
+def get_course_detail(course_slug:str,session:Session=Depends(get_session))->CourseRead:
+    statement = select(Course).where(Course.slug == course_slug)
     result = session.exec(statement=statement).first()
     if not result:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -68,6 +89,18 @@ def create_chapter(chapter:ChapterCreate,session:Session=Depends(get_session))->
 def get_chapter_list(session:Session=Depends(get_session))->List[ChapterRead]:
     statement = select(Chapter)
     results = session.exec(statement=statement).all()
+    return results
+
+@router.get("/chapters/sitemap")
+def get_chapter_sitemap(session:Session=Depends(get_session))->List[ChapterNested]:
+    statement = select(Chapter)
+    results = session.exec(statement=statement).all()
+    return results
+
+@router.get("/chapters/sitemap/{course_slug}/{chapter_slug}")
+def get_chapter_sitemap_detail(course_slug:str,chapter_slug:str,session:Session=Depends(get_session))->ChapterNested:
+    statement = (select(Chapter).join(Course).where(Course.slug == course_slug,Chapter.slug == chapter_slug).options(selectinload(Chapter.course)))
+    results = session.exec(statement=statement).first()
     return results
 
 @router.get("/chapters/{chapter_id}")
@@ -110,11 +143,26 @@ def create_subchapter(subchapter:SubChapterCreate,session:Session=Depends(get_se
     session.refresh(db_subchapter)
     return db_subchapter
 
+
 @router.get("/subchapters")
 def get_subchapter_list(session:Session=Depends(get_session))->List[SubChapter]:
     statement = select(SubChapter)
     results = session.exec(statement=statement).all()
     return results
+
+@router.get("/subchapters/sitemap")
+def get_subchapter_sitemap(session:Session=Depends(get_session))->List[SubChapterNested]:
+    statement = select(SubChapter)
+    results = session.exec(statement=statement).all()
+    return results
+
+@router.get("/chapters/sitemap/{course_slug}/{chapter_slug}/{subchapter_slug}")
+def get_subchapter_sitemap_detail(course_slug:str,chapter_slug:str,subchapter_slug:str,session:Session=Depends(get_session))->SubChapterNested:
+    statement = (select(SubChapter).join(Chapter).join(Course).where(Course.slug == course_slug,Chapter.slug == chapter_slug,SubChapter.slug == subchapter_slug).options(selectinload(SubChapter.chapter).selectinload(Chapter.course)))
+    results = session.exec(statement=statement).first()
+    return results
+
+
 
 @router.get("/subchapters/{subchapter_id}")
 def get_subchapter_detail(subchapter_id:int,session:Session=Depends(get_session))->SubChapterRead:
@@ -220,6 +268,11 @@ def update_course_content(course_content_id:int,course_content_update:CourseCont
     session.commit()
     session.refresh(content_db)
     return content_db
+
+# routers for sitemap
+
+
+
 
 
 

@@ -38,6 +38,7 @@ def generate_unique_slug(name: str, session: Session, model) -> str:
 # course model 
 class CourseBase(SQLModel):
     name: str = Field(index=True)
+    description : str = Field(sa_column=Column(Text),default=None)
     slug: Optional[str] = Field(index=True,sa_column_kwargs={"unique": True})
     is_active:bool = Field(default=True)
     created_at: Optional[datetime] = Field(
@@ -85,9 +86,11 @@ class Course(CourseBase,table=True):
 
 class CourseCreate(SQLModel):
     name:str
+    description : str
 
 class CourseUpdate(SQLModel):
     name: str|None
+    description : str
 
 # chapter model 
 class ChapterBase(SQLModel):
