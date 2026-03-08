@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.tutorial import routers as tutorial_router
 from app.account import routers as account_router
 from app.neclicense import router as nec_router
+from app.infography import routers as infography_router
 
 from app.dependencies import get_token_header
 
@@ -27,12 +28,13 @@ async def lifespan(app:FastAPI):
     yield
     print("Shutting down........")
 
-app = FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None )
-# app = FastAPI(lifespan=lifespan)
+# app = FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None )
+app = FastAPI(lifespan=lifespan)
 
 app.include_router(tutorial_router.router)
 app.include_router(account_router.router)
 app.include_router(nec_router.router)
+app.include_router(infography_router.router)
 
 # app.include_router(course_router.router)
 # app.include_router(chapter_router.router)
@@ -44,6 +46,8 @@ origins = [
     "https://www.ezexplanation.com",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://localhost:3001",
 ]
 
 app.add_middleware(

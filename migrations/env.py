@@ -10,6 +10,7 @@ from sqlmodel import SQLModel
 from app.tutorial.models import *
 from app.account.models import *
 from app.neclicense.models import *
+from app.infography.models import *
 # from app.models import *
 
 # this is the Alembic Config object, which provides
