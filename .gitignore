@@ -29,3 +29,5 @@ test_db.db
 dist/
 build/
 *.whl
+
+uploads/
