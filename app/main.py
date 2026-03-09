@@ -28,8 +28,8 @@ async def lifespan(app:FastAPI):
     yield
     print("Shutting down........")
 
-app = FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None )
-# app = FastAPI(lifespan=lifespan)
+# app = FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None )
+app = FastAPI(lifespan=lifespan)
 
 app.include_router(tutorial_router.router)
 app.include_router(account_router.router)
