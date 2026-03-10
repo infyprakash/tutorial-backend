@@ -227,6 +227,8 @@ class DatasetNestedRead(SQLModel):
 
     category: Optional[CategoryNestedRead]
     tag_links: List[DatasetTagNestedRead]
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
 
 
 class ReportNestedRead(SQLModel):
@@ -238,3 +240,5 @@ class ReportNestedRead(SQLModel):
 
     category: Optional[CategoryNestedRead]
     tag_links: List[ReportTagNestedRead]
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
