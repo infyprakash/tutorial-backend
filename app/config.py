@@ -7,7 +7,13 @@ class Settings(BaseSettings):
     db_host:str 
     database:str 
     token_api_key:str 
-    auth_secret_key:str 
+    auth_secret_key:str
+    api_host:str
+
+    @computed_field
+    @property
+    def api_host_string(self)->str:
+        return self.api_host 
 
     @computed_field
     @property

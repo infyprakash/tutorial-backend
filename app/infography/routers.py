@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 
 from app.dependencies import get_token_header
+from app.config import settings
 
 router = APIRouter(
     prefix="/infography",
@@ -27,6 +28,7 @@ UPLOAD_DIR = Path("uploads/datasets")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json"}
+
 
 
 def validate_file(file: UploadFile):
@@ -63,6 +65,17 @@ def save_file(file: UploadFile) -> str:
 
 
 # category routes 
+
+@router.post("/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+
+    unique_filename = f"{uuid4().hex}_{file.filename}"
+    path = f"uploads/graphs/{unique_filename}"
+
+    with open(path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    return {"url": f"{settings.api_host}{path}"}
 
 @router.post("/categories", response_model=CategoryRead)
 def create_category(

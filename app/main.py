@@ -3,6 +3,8 @@ from app.database import engine
 from sqlmodel import SQLModel
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
 
 
 # from app.routers import course as course_router
@@ -14,7 +16,6 @@ from app.tutorial import routers as tutorial_router
 from app.account import routers as account_router
 from app.neclicense import router as nec_router
 from app.infography import routers as infography_router
-from app.middleware.limit_upload import LimitUploadSizeMiddleware
 
 from app.dependencies import get_token_header
 
@@ -30,7 +31,7 @@ async def lifespan(app:FastAPI):
     print("Shutting down........")
 
 app = FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None )
-app.add_middleware(LimitUploadSizeMiddleware, max_upload_size=50*1024*1024)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # app = FastAPI(lifespan=lifespan)
 
