@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI,Depends
 from app.database import engine
 from sqlmodel import SQLModel
@@ -30,10 +31,17 @@ async def lifespan(app:FastAPI):
     yield
     print("Shutting down........")
 
-app = FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None )
-# app = FastAPI(lifespan=lifespan)
+# app = FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None )
+app = FastAPI(lifespan=lifespan)
 
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+app.mount(
+    "/uploads",
+    StaticFiles(directory=os.path.join(BASE_DIR, "uploads")),
+    name="uploads"
+)
 
 app = FastAPI(lifespan=lifespan)
 
