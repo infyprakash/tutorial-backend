@@ -35,11 +35,9 @@ async def lifespan(app:FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 app.mount(
     "/uploads",
-    StaticFiles(directory=os.path.join(BASE_DIR, "uploads")),
+    StaticFiles(directory="/opt/tutorial-backend/uploads"),
     name="uploads"
 )
 
