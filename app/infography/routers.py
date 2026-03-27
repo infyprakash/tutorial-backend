@@ -16,6 +16,12 @@ from sqlalchemy.exc import IntegrityError
 from app.dependencies import get_token_header
 from app.config import settings
 
+import pandas as pd 
+import pyarrow
+
+from app.infography.query_engine import ChartQueryEngine
+
+
 router = APIRouter(
     prefix="/infography",
     tags=["infography"],
@@ -23,9 +29,13 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 UPLOAD_DIR = Path("uploads/datasets")
+# PARQUET_DIR = Path("parquet_data")
+PARQUET_DIR = BASE_DIR / "parquet_data"
+
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+PARQUET_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json"}
 
@@ -63,7 +73,34 @@ def save_file(file: UploadFile) -> str:
 
     return str(file_path)
 
+def get_parquet_filename(filename: str):
+    p = Path(filename)
+    return f"{p.stem}.parquet"
 
+def get_parquet_filepath(original_path: str):
+    # original_path is "uploads/datasets/uuid_name.csv"
+    filename = Path(original_path).name
+    pq_name = get_parquet_filename(filename)
+    # This returns the absolute path to the parquet file
+    return PARQUET_DIR / pq_name
+
+
+def convert_to_parquet(file_path):
+    filename = file_path.split("/")[-1]
+    if filename.endswith('.csv'):
+        df = pd.read_csv(file_path)
+    elif filename.endswith('.json'):
+        df = pd.read_json(file_path)
+    elif filename.endswith('.xlsx'):
+        df = pd.read_excel(file_path)
+    else:
+        raise ValueError("Invalid file input")
+
+    output_filename = get_parquet_filename(filename=filename)
+    output_file = PARQUET_DIR / output_filename
+    df.to_parquet(output_file,engine='pyarrow',index=False)
+    
+    
 # category routes 
 
 @router.post("/upload-image")
@@ -254,6 +291,29 @@ def list_datasets(
     datasets = session.exec(statement).all()
     return datasets
 
+@router.get("/datasets/all", response_model=List[DatasetNestedRead])
+def list_datasets(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, le=100),
+    session: Session = Depends(get_session),
+):
+    offset = (page - 1) * page_size
+
+    statement = (
+        select(Dataset)
+        .options(
+            selectinload(Dataset.category),
+            selectinload(Dataset.tag_links).selectinload(DatasetTag.tag),
+        )
+        .order_by(desc(Dataset.created_at))
+        .offset(offset)
+        .limit(page_size)
+    )
+
+    datasets = session.exec(statement).all()
+    return datasets
+
+
 @router.get("/datasets/latest", response_model=List[DatasetNestedRead])
 def latest_datasets(session: Session = Depends(get_session)):
     statement = (
@@ -299,9 +359,11 @@ def create_dataset(
         category = session.get(Category, category_id)
         if not category:
             raise HTTPException(status_code=404, detail="Category not found.")
-
-    # Save file
+    
+    # # Save file
+    
     file_path = save_file(file)
+    convert_to_parquet(file_path=file_path)
 
     # Create dataset with slug generation
     dataset = Dataset(
@@ -337,6 +399,73 @@ def create_dataset(
     return get_dataset_with_relations(dataset.id, session)
 
 
+# @router.put("/datasets/{dataset_id}", response_model=DatasetNestedRead)
+# def update_dataset(
+#     dataset_id: int,
+#     name: Optional[str] = Form(None),
+#     description: Optional[str] = Form(None),
+#     category_id: Optional[int] = Form(None),
+#     tag_ids: Optional[str] = Form(None),
+#     file: Optional[UploadFile] = File(None),
+#     session: Session = Depends(get_session),
+# ):
+
+#     dataset = session.get(Dataset, dataset_id)
+
+#     if not dataset:
+#         raise HTTPException(status_code=404, detail="Dataset not found.")
+
+#     # Update fields
+#     if name:
+#         dataset.name = name
+
+#     if description:
+#         dataset.description = description
+
+#     if category_id is not None:
+#         category = session.get(Category, category_id)
+#         if not category:
+#             raise HTTPException(status_code=404, detail="Category not found.")
+#         dataset.category_id = category_id
+
+#     # Replace file if provided
+#     if file:
+#         # Delete old file safely
+#         if dataset.file_path and Path(dataset.file_path).exists():
+#             Path(dataset.file_path).unlink()
+
+#         dataset.file_path = save_file(file)
+
+#     session.add(dataset)
+#     session.commit()
+
+#     # Replace tags if provided
+#     if tag_ids is not None:
+#         # Remove old links
+#         existing_links = session.exec(
+#             select(DatasetTag).where(DatasetTag.dataset_id == dataset_id)
+#         ).all()
+
+#         for link in existing_links:
+#             session.delete(link)
+
+#         session.commit()
+
+#         # Add new links
+#         tag_id_list = [int(t.strip()) for t in tag_ids.split(",")]
+
+#         for tag_id in tag_id_list:
+#             tag = session.get(Tag, tag_id)
+#             if not tag:
+#                 raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found.")
+
+#             new_link = DatasetTag(dataset_id=dataset_id, tag_id=tag_id)
+#             session.add(new_link)
+
+#         session.commit()
+
+#     return get_dataset_with_relations(dataset_id, session)
+
 @router.put("/datasets/{dataset_id}", response_model=DatasetNestedRead)
 def update_dataset(
     dataset_id: int,
@@ -344,6 +473,7 @@ def update_dataset(
     description: Optional[str] = Form(None),
     category_id: Optional[int] = Form(None),
     tag_ids: Optional[str] = Form(None),
+    is_active: Optional[bool] = Form(None),   
     file: Optional[UploadFile] = File(None),
     session: Session = Depends(get_session),
 ):
@@ -353,7 +483,8 @@ def update_dataset(
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found.")
 
-    # Update fields
+
+
     if name:
         dataset.name = name
 
@@ -366,7 +497,9 @@ def update_dataset(
             raise HTTPException(status_code=404, detail="Category not found.")
         dataset.category_id = category_id
 
-    # Replace file if provided
+    if is_active is not None:
+        dataset.is_active = is_active
+
     if file:
         # Delete old file safely
         if dataset.file_path and Path(dataset.file_path).exists():
@@ -374,8 +507,11 @@ def update_dataset(
 
         dataset.file_path = save_file(file)
 
+        convert_to_parquet(file_path=dataset.file_path)
+
     session.add(dataset)
     session.commit()
+    session.refresh(dataset)  
 
     # Replace tags if provided
     if tag_ids is not None:
@@ -559,13 +695,19 @@ def latest_reports(session: Session = Depends(get_session)):
         .where(Report.is_active == True)
         .options(
             selectinload(Report.category),
+
             selectinload(Report.tag_links).selectinload(ReportTag.tag),
+
+            selectinload(Report.topics).selectinload(ReportTopic.graphs),
+
+            selectinload(Report.dataset_links).selectinload(ReportDataset.dataset),
         )
         .order_by(desc(Report.created_at))
         .limit(5)
     )
 
     reports = session.exec(statement).all()
+
     return reports
 
 @router.get("/reports/all", response_model=List[ReportNestedRead])
@@ -583,6 +725,47 @@ def all_reports(session: Session = Depends(get_session)):
     reports = session.exec(statement).all()
     return reports
 
+import asyncio
+
+
+
+@router.get("/reports/graphconfig/{report_id}/{topic_id}/{graph_id}")
+async def get_report_related_graph_config(
+    report_id: int,
+    topic_id: int,
+    graph_id: int,
+    session: Session = Depends(get_session)  # use your current sync session
+):
+    # fetch related dataset
+    report_dataset = session.exec(
+        select(ReportDataset).where(ReportDataset.report_id == report_id)
+    ).first()
+    if not report_dataset:
+        return {"error": "ReportDataset not found"}
+
+    dataset = session.exec(
+        select(Dataset).where(Dataset.id == report_dataset.dataset_id)
+    ).first()
+    if not dataset:
+        return {"error": "Dataset not found"}
+
+    report_graph = session.exec(
+        select(ReportGraph).where(ReportGraph.id == graph_id)
+    ).first()
+    if not report_graph:
+        return {"error": "ReportGraph not found"}
+
+    # prepare chart config
+    parquet_path = get_parquet_filepath(dataset.file_path)
+    chart_config = json.loads(report_graph.chart_config)
+    chart_config['dataset'] = str(parquet_path)
+
+    # run CPU-heavy chart execution in threadpool to avoid blocking server
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        None, lambda: ChartQueryEngine(config=chart_config).execute()
+    )
+    return result
 
 @router.put("/reports/{report_id}", response_model=ReportNestedRead)
 def update_report(
@@ -761,395 +944,383 @@ def filter_reports_by_tags(
     return session.exec(statement).all()
 
 
+# routers for reportTopic
+
+@router.post("/report-topics", response_model=ReportTopicRead)
+def create_report_topic(
+    payload: ReportTopicCreate,
+    session: Session = Depends(get_session),
+):
+    # Validate report
+    report = session.get(Report, payload.report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found.")
+
+    topic = ReportTopic.model_validate(
+        payload.model_dump(),
+        context={"session": session, "model_class": ReportTopic},
+    )
+
+    session.add(topic)
+    session.commit()
+    session.refresh(topic)
+
+    return topic
+
+@router.get("/report-topics/report/{report_id}", response_model=List[ReportTopicNestedRead])
+def filter_report_topics_by_report(
+    report_id: int,
+    session: Session = Depends(get_session),
+):
+    report = session.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found.")
+
+    statement = (
+        select(ReportTopic)
+        .where(ReportTopic.report_id == report_id)
+        .options(
+            selectinload(ReportTopic.graphs)
+        )
+        .order_by(desc(ReportTopic.created_at))
+    )
+
+    topics = session.exec(statement).all()
+    return topics
+
+@router.get("/report-topics", response_model=List[ReportTopicNestedRead])
+def list_report_topics(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, le=100),
+    session: Session = Depends(get_session),
+):
+    offset = (page - 1) * page_size
+
+    statement = (
+        select(ReportTopic)
+        .options(
+            selectinload(ReportTopic.graphs)
+        )
+        .order_by(desc(ReportTopic.created_at))
+    )
+
+    topics = session.exec(statement).all()
+    return topics
 
 
+@router.put("/report-topics/{topic_id}", response_model=ReportTopicNestedRead)
+def update_report_topic(
+    topic_id: int,
+    name: Optional[str] = Form(None),
+    topic_content: Optional[str] = Form(None),
+    report_id: Optional[int] = Form(None),
+    session: Session = Depends(get_session),
+):
+    topic = session.get(ReportTopic, topic_id)
+
+    if not topic:
+        raise HTTPException(status_code=404, detail="Report topic not found.")
+
+    # Update fields
+    if name:
+        topic.name = name
+
+    if topic_content:
+        topic.topic_content = topic_content
+
+    if report_id is not None:
+        report = session.get(Report, report_id)
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found.")
+        topic.report_id = report_id
+
+    session.add(topic)
+    session.commit()
+
+    # Reload with relations (graphs)
+    statement = (
+        select(ReportTopic)
+        .where(ReportTopic.id == topic_id)
+        .options(selectinload(ReportTopic.graphs))
+    )
+
+    updated_topic = session.exec(statement).first()
+
+    return updated_topic
+
+# routers for ReportGraph 
+
+def get_report_graph_with_relations(graph_id: int, session: Session):
+    statement = (
+        select(ReportGraph)
+        .where(ReportGraph.id == graph_id)
+        .options(
+            selectinload(ReportGraph.topic),
+            selectinload(ReportGraph.dataset),  
+        )
+    )
+    return session.exec(statement).first()
+
+@router.post("/report-graphs", response_model=ReportGraphRead)
+def create_report_graph(
+    payload: ReportGraphCreate,
+    session: Session = Depends(get_session),
+):
+    topic = session.get(ReportTopic, payload.report_topic_id)
+    if not topic:
+        raise HTTPException(status_code=404, detail="Report topic not found.")
+
+    if payload.dataset_id:
+        dataset = session.get(Dataset, payload.dataset_id)
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found.")
+
+    graph = ReportGraph(**payload.model_dump())
+
+    session.add(graph)
+    session.commit()
+    session.refresh(graph)
+
+    if graph.chart_config:
+        chart_config = graph.chart_config
+        if dataset:
+            parquet_path = get_parquet_filepath(dataset.file_path)
+            config = json.loads(chart_config)
+            config["dataset"] = str(parquet_path)
+            result = ChartQueryEngine(config=config).execute().get("data")
+            config["data"] = result
+            graph.chart_config = json.dumps(config)
+    
+    session.add(graph)
+    session.commit()
+    session.refresh(graph)
+
+    return graph
 
 
+@router.get(
+    "/report-graphs/topic/{report_topic_id}",
+    response_model=List[ReportGraphRead],
+)
+def filter_graphs_by_topic(
+    report_topic_id: int,
+    session: Session = Depends(get_session),
+):
+    topic = session.get(ReportTopic, report_topic_id)
 
-# @router.get("/tagtype")
-# def get_tagtype(session:Session=Depends(get_session))->List[TagTypeRead]:
-#     results = session.exec(select(TagType)).all()
-#     return results
+    if not topic:
+        raise HTTPException(status_code=404, detail="Report topic not found.")
 
-# @router.post("/tagtype")
-# def create_tagtype(tagtype_create:TagTypeCreate,session:Session=Depends(get_session))->TagTypeRead:
-#     db = TagType.model_validate(tagtype_create.model_dump(),context={'session':session,'model_class':TagType})
-#     session.add(db)
-#     session.commit()
-#     session.refresh(db)
-#     return db
+    statement = (
+        select(ReportGraph)
+        .where(ReportGraph.report_topic_id == report_topic_id)
+        .order_by(desc(ReportGraph.created_at))
+    )
 
-# @router.get("/tagtype/{tagtype_id}")
-# def get_tagtype_detail(tagtype_id:int,session:Session=Depends(get_session))->TagTypeRead:
-#     result = session.exec(select(TagType).where(TagType.id == tagtype_id)).first()
-#     return result
+    graphs = session.exec(statement).all()
 
-# @router.put("/tagtype/{tagtype_id}")
-# def update_tagtype(tagtype_id:int,tagtype_update:TagTypeUpdate,session:Session=Depends(get_session))->TagTypeRead:
-#     db = session.get(TagType,tagtype_id)
-#     if not db:
-#         raise HTTPException(status_code=400,detail='tag type not found')
-#     update_data = tagtype_update.model_dump(exclude_unset=True)
-#     for key,value in update_data.items():
-#         setattr(db,key,value)
-#     session.add(db)
-#     session.commit()
-#     session.refresh(db)
-#     return db
-
-# # routers for tag 
-
-# @router.get("/tag")
-# def get_tag(session:Session=Depends(get_session))->List[TagRead]:
-#     results = session.exec(select(Tag)).all()
-#     return results
-
-# @router.post("/tag")
-# def create_tag(tag_create:TagCreate,session:Session=Depends(get_session))->TagRead:
-#     db = Tag.model_validate(tag_create.model_dump(),context={'session':session,'model_class':Tag})
-#     session.add(db)
-#     session.commit()
-#     session.refresh(db)
-#     return db
-
-# @router.get("/tag/{tag_id}")
-# def get_tag_detail(tag_id:int,session:Session=Depends(get_session))->TagRead:
-#     result = session.exec(select(Tag).where(Tag.id == tag_id)).first()
-#     return result
-
-# @router.put("/tag/{tag_id}")
-# def update_tag(tag_id:int,tag_update:TagUpdate,session:Session=Depends(get_session))->TagRead:
-#     db = session.get(Tag,tag_id)
-#     if not db:
-#         raise HTTPException(status_code=400,detail='tag not found')
-#     update_data = tag_update.model_dump(exclude_unset=True)
-#     for key,value in update_data.items():
-#         setattr(db,key,value)
-#     session.add(db)
-#     session.commit()
-#     session.refresh(db)
-#     return db
-
-# # router for dataset
- 
-# UPLOAD_DIR = Path("uploads")
-# UPLOAD_DIR.mkdir(exist_ok=True)
-
-# @router.get("/dataset")
-# def get_dataset(session:Session=Depends(get_session))->List[DatasetNestedRead]:
-#     results = session.exec(select(Dataset).where(Dataset.is_active==True)).all()
-#     return results
-
-# # @router.post("/dataset")
-# # def create_dataset(name:str=Form(...),description:str=Form(...),file:UploadFile=File(...),session:Session=Depends(get_session))->DatasetRead:
-# #     file_path = UPLOAD_DIR / file.filename
-# #     with file_path.open("wb") as buffer:
-# #         shutil.copyfileobj(file.file,buffer)
-# #     unique_slug = generate_unique_slug(name, session, Dataset)
-# #     db = Dataset(name=name,description=description,slug=unique_slug,file_path=str(file_path))
-# #     session.add(db)
-# #     session.commit()
-# #     session.refresh(db)
-# #     return db
+    return graphs
 
 
-# @router.post("/dataset", response_model=DatasetRead)
-# def create_dataset(
-#     name: str = Form(...),
-#     description: str = Form(...),
-#     tag_ids: List[str] = Form(...),  
-#     file: UploadFile = File(...),
-#     session: Session = Depends(get_session)
+@router.put("/report-graphs/{graph_id}", response_model=ReportGraphRead)
+def update_report_graph(
+    graph_id: int,
+    title: Optional[str] = Form(None),
+    chart_config: Optional[str] = Form(None),
+    report_topic_id: Optional[int] = Form(None),
+    dataset_id: Optional[int] = Form(None),  
+    session: Session = Depends(get_session),
+):
+    graph = session.get(ReportGraph, graph_id)
+
+    if not graph:
+        raise HTTPException(status_code=404, detail="Report graph not found.")
+
+    if title:
+        graph.title = title
+
+    if dataset_id is not None:
+        if dataset_id:
+            dataset = session.get(Dataset, dataset_id)
+            if not dataset:
+                raise HTTPException(status_code=404, detail="Dataset not found.")
+        graph.dataset_id = dataset_id
+
+    if report_topic_id is not None:
+        topic = session.get(ReportTopic, report_topic_id)
+        if not topic:
+            raise HTTPException(status_code=404, detail="Report topic not found.")
+        graph.report_topic_id = report_topic_id
+
+    dataset = None
+
+    if graph.dataset_id:
+        dataset = session.get(Dataset, graph.dataset_id)
+
+    if not dataset:
+        topic = session.get(ReportTopic, graph.report_topic_id)
+        if topic:
+            report_dataset = session.exec(
+                select(ReportDataset).where(
+                    ReportDataset.report_id == topic.report_id
+                )
+            ).first()
+
+            if report_dataset:
+                dataset = session.get(Dataset, report_dataset.dataset_id)
+
+    if chart_config:
+        if not dataset:
+            raise HTTPException(status_code=400, detail="No dataset available for graph")
+
+        parquet_path = get_parquet_filepath(dataset.file_path)
+        config = json.loads(chart_config)
+        config["dataset"] = str(parquet_path)
+
+        result = ChartQueryEngine(config=config).execute().get("data")
+
+        config["data"] = result
+        graph.chart_config = json.dumps(config)
+
+    session.add(graph)
+    session.commit()
+    session.refresh(graph)
+
+    return graph
+
+
+@router.get("/report-graphs", response_model=List[ReportGraphRead])
+def get_all_report_graphs(session: Session = Depends(get_session)):
+    statement = (
+        select(ReportGraph)
+        .order_by(desc(ReportGraph.created_at))
+    )
+
+    graphs = session.exec(statement).all()
+    return graphs
+
+# routers for ReportDataset
+def get_report_dataset_with_relations(link_id: int, session: Session):
+    statement = (
+        select(ReportDataset)
+        .where(ReportDataset.id == link_id)
+        .options(selectinload(ReportDataset.dataset))
+    )
+    return session.exec(statement).first()
+
+@router.post("/report-datasets", response_model=ReportDatasetNestedRead)
+def create_report_dataset(
+    payload: ReportDatasetCreate,
+    session: Session = Depends(get_session),
+):
+    report = session.get(Report, payload.report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found.")
+
+    dataset = session.get(Dataset, payload.dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found.")
+
+    link = ReportDataset(**payload.model_dump())
+
+    session.add(link)
+    session.commit()
+    session.refresh(link)
+
+    return get_report_dataset_with_relations(link.id, session)
+
+
+@router.get(
+    "/report-datasets/report/{report_id}",
+    response_model=List[ReportDatasetNestedRead],
+)
+def filter_datasets_by_report(
+    report_id: int,
+    session: Session = Depends(get_session),
+):
+    report = session.get(Report, report_id)
+
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found.")
+
+    statement = (
+        select(ReportDataset)
+        .where(ReportDataset.report_id == report_id)
+        .options(selectinload(ReportDataset.dataset))
+    )
+
+    links = session.exec(statement).all()
+
+    return links
+
+# @router.put("/report-datasets/{link_id}", response_model=ReportDatasetNestedRead)
+# def update_report_dataset(
+#     link_id: int,
+#     report_id: Optional[int] = Form(None),
+#     dataset_id: Optional[int] = Form(None),
+#     session: Session = Depends(get_session),
 # ):
-    
-#     file_path = UPLOAD_DIR / file.filename
-#     with file_path.open("wb") as buffer:
-#         shutil.copyfileobj(file.file, buffer)
+#     link = session.get(ReportDataset, link_id)
 
+#     if not link:
+#         raise HTTPException(status_code=404, detail="Report dataset link not found.")
 
-#     unique_slug = generate_unique_slug(name, session, Dataset)
-    
-#     db_dataset = Dataset(
-#         name=name,
-#         description=description,
-#         slug=unique_slug,
-#         file_path=str(file_path)
-#     )
-#     session.add(db_dataset)
-#     session.flush() # Flush to get the db_dataset.id without committing yet
-    
-#     tag_ids = tag_ids[0].split(",")
+#     if report_id is not None:
+#         report = session.get(Report, report_id)
+#         if not report:
+#             raise HTTPException(status_code=404, detail="Report not found.")
+#         link.report_id = report_id
 
-#     for t_id in tag_ids:
-#         print(t_id)
-#         new_link = DatasetTag(dataset_id=db_dataset.id, tag_id= int(t_id))
-#         session.add(new_link)
+#     if dataset_id is not None:
+#         dataset = session.get(Dataset, dataset_id)
+#         if not dataset:
+#             raise HTTPException(status_code=404, detail="Dataset not found.")
+#         link.dataset_id = dataset_id
 
+#     session.add(link)
 #     session.commit()
-#     session.refresh(db_dataset)
-    
-#     return db_dataset
 
-# from fastapi import APIRouter, Form, File, UploadFile, Depends, HTTPException
-# from sqlalchemy import delete
+#     return get_report_dataset_with_relations(link_id, session)
 
-# @router.patch("/dataset/{dataset_id}", response_model=DatasetRead)
-# def update_dataset(
-#     dataset_id: int,
-#     name: str = Form(None),
-#     description: str = Form(None),
-#     tag_ids: List[str] = Form(None),  
-#     file: UploadFile = File(None),
-#     session: Session = Depends(get_session)
-# ):
-#     # 1. Fetch existing dataset
-#     db_dataset = session.get(Dataset, dataset_id)
-#     if not db_dataset:
-#         raise HTTPException(status_code=404, detail="Dataset not found")
+from fastapi import Body
 
-#     # 2. Update basic fields
-#     if name:
-#         # Update slug if name changes
-#         if name != db_dataset.name:
-#             db_dataset.slug = generate_unique_slug(name, session, Dataset)
-#         db_dataset.name = name
-#     if description:
-#         db_dataset.description = description
+@router.put("/report-datasets/{link_id}", response_model=ReportDatasetNestedRead)
+def update_report_dataset(
+    link_id: int,
+    report_id: Optional[int] = Body(None),
+    dataset_id: Optional[int] = Body(None),
+    session: Session = Depends(get_session),
+):
+    link = session.get(ReportDataset, link_id)
 
-#     # 3. Handle File Update (Only if a new file is uploaded)
-#     if file:
-#         file_path = UPLOAD_DIR / file.filename
-#         with file_path.open("wb") as buffer:
-#             shutil.copyfileobj(file.file, buffer)
-#         db_dataset.file_path = str(file_path)
+    if not link:
+        raise HTTPException(status_code=404, detail="Report dataset link not found.")
 
-#     # 4. Update Tags (Syncing logic)
-#     if tag_ids:
-#         # Clean the input based on your specific split format
-#         processed_tag_ids = [int(t_id) for t_id in tag_ids[0].split(",") if t_id.strip()]
-        
-#         # Remove existing links for this dataset
-#         statement = delete(DatasetTag).where(DatasetTag.dataset_id == dataset_id)
-#         session.exec(statement)
-        
-#         # Add new links
-#         for t_id in processed_tag_ids:
-#             new_link = DatasetTag(dataset_id=dataset_id, tag_id=t_id)
-#             session.add(new_link)
+    if report_id is not None:
+        report = session.get(Report, report_id)
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found.")
+        link.report_id = report_id
 
-#     session.add(db_dataset)
-#     session.commit()
-#     session.refresh(db_dataset)
-#     return db_dataset
-
-# @router.get("/dataset/{dataset_id}")
-# def get_dataset(dataset_id:int,session:Session=Depends(get_session))->DatasetNestedRead:
-#     results = session.exec(select(Dataset).where(Dataset.id== dataset_id)).first()
-#     return results
-
-# @router.get("/dataset/detail/{dataset_slug}")
-# def get_dataset_detail(dataset_slug:str,session:Session=Depends(get_session))->DatasetNestedRead:
-#     results = session.exec(select(Dataset).where(Dataset.slug== dataset_slug)).first()
-#     return results
-
-# @router.put("/dataset/{dataset_id}")
-# def create_dataset(dataset_id:int,name:str=Form(...),description:str=Form(...),file:UploadFile=File(...),session:Session=Depends(get_session))->DatasetRead:
-#     db = session.get(Dataset,dataset_id)
-#     if not db:
-#         raise HTTPException(status_code=404, detail="Dataset not found")
-#     if file:
-#         if db.file_path and os.path.exists(db.file_path):
-#             os.remove(db.file_path)
-
-#         file_path = UPLOAD_DIR / f"{generate_random_string(4)}_{file.filename}"
-#         with file_path.open("wb") as buffer:
-#             shutil.copyfileobj(file.file,buffer)
-#         db.file_path = str(file_path)
-    
-#     if db.name != name:
-#         db.name = name
-#         db.slug = generate_unique_slug(name, session, Dataset)
-
-#     db.description = description
-
-#     session.add(db)
-#     session.commit()
-#     session.refresh(db)
-#     return db 
-
-# # routers for data tag 
-
-# @router.get("/dataset/tag/")
-# def get_dataset_tag(session:Session=Depends(get_session))->List[DatasetTagRead]:
-#     results = session.exec(select(DatasetTag)).all()
-#     return results
-
-# @router.post("/dataset/tag/")
-# def create_dataset_tag(dataset_tag_create:DatasetTagCreate,session:Session=Depends(get_session))->DatasetTagRead:
-#     db = DatasetTag.model_validate(dataset_tag_create.model_dump(),context={'session':session,'model_class':DatasetTag})
-#     session.add(db)
-#     session.commit()
-#     session.refresh(db)
-#     return db
-
-# @router.get("/dataset/tag/{dataset_id}")
-# def get_dataset_tag_by_dataset_id(dataset_id:int,session:Session=Depends(get_session))->DatasetTag:
-#     result = session.exec(select(DatasetTag).where(DatasetTag.dataset_id==dataset_id)).first()
-#     return result
-
-# @router.put("/dataset/tag/{dataset_tag_id}")
-# def update_dataset_tag(dataset_tag_id:int,dataset_tag_update:DatasetTagUpdate,session:Session=Depends(get_session))->DatasetTagRead:
-#     db = session.get(DatasetTag,dataset_tag_id)
-#     if not db:
-#         raise HTTPException(status_code=400,detail='dataset tag not found')
-#     update_data = dataset_tag_update.model_dump(exclude_unset=True)
-#     for key,value in update_data.items():
-#         setattr(db,key,value)
-#     session.add(db)
-#     session.commit()
-#     session.refresh(db)
-#     return db
-
-# # routers for report 
-# @router.get('/report')
-# def get_reports(session:Session=Depends(get_session))->List[ReportNestedRead]:
-#     results = session.exec(select(Report).where(Report.is_active==True)).all()
-#     return results
-
-# @router.get("/report/recent")
-# def get_recent_reports(session: Session = Depends(get_session))->List[ReportNestedRead]:
-#     """
-#     Fetch the 10 most recently created reports.
-#     """
-#     statement = (select(Report).order_by(desc(Report.created_at)).limit(10))    
-#     results = session.exec(statement).all()
-#     return results
-
-# @router.get("/report/filter")
-# def filter_reports_by_tags(tag_ids: List[int] = Query(...), session: Session = Depends(get_session)):
-#     """
-#     Filter reports that are associated with any of the provided tag IDs.
-#     Example: /reports/filter?tag_ids=1&tag_ids=5
-#     """
-#     print(tag_ids,)
-#     statement = (select(Report).join(ReportTag).where(ReportTag.tag_id.in_(tag_ids)).distinct())
-    
-#     results = session.exec(statement).all()
-    
-#     return results
-
-# @router.get('/report/{report_id}')
-# def get_reports(report_id:int,session:Session=Depends(get_session))->ReportNestedRead:
-#     results = session.exec(select(Report).where(Report.id==report_id)).first()
-#     return results
-
-# @router.get('/report/detail/{report_slug}')
-# def get_report_detail(report_slug:str,session:Session=Depends(get_session))->ReportNestedRead:
-#     results = session.exec(select(Report).where(Report.slug==report_slug)).first()
-#     return results
-
-# @router.post("/report", response_model=ReportRead)
-# def create_report(
-#     name: str = Form(...),
-#     content: str = Form(...),
-#     tag_ids: str = Form(...), # Expecting "1,2,3"
-#     session: Session = Depends(get_session)):
-#     # 1. Generate unique slug manually (or via validator context)
-#     unique_slug = generate_unique_slug(name, session, Report)
-    
-#     # 2. Create the Report instance
-#     db_report = Report(
-#         name=name,
-#         content=content,
-#         slug=unique_slug
-#     )
-#     session.add(db_report)
-#     session.flush() # Get the db_report.id
-
-#     # 3. Handle multiple tags
-#     # Clean the string and split it
-#     id_list = [int(t_id.strip()) for t_id in tag_ids.split(",") if t_id.strip()]
-    
-#     for t_id in id_list:
-#         report_tag = ReportTag(report_id=db_report.id, tag_id=t_id)
-#         session.add(report_tag)
-
-#     session.commit()
-#     session.refresh(db_report)
-#     return db_report
+    if dataset_id is not None:
+        dataset = session.get(Dataset, dataset_id)
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found.")
+        link.dataset_id = dataset_id
 
 
-# @router.patch("/report/{report_id}", response_model=ReportRead)
-# def update_report(
-#     report_id: int,
-#     name: str = Form(None),
-#     content: str = Form(None),
-#     tag_ids: str = Form(None), # Expecting "1,4,5"
-#     session: Session = Depends(get_session)
-# ):
-#     # 1. Check if report exists
-#     db_report = session.get(Report, report_id)
-#     if not db_report:
-#         raise HTTPException(status_code=404, detail="Report not found")
+    session.commit()
+    session.refresh(link)
 
-#     # 2. Update basic fields
-#     if name:
-#         if name != db_report.name:
-#             db_report.slug = generate_unique_slug(name, session, Report)
-#         db_report.name = name
-#     if content:
-#         db_report.content = content
+    return get_report_dataset_with_relations(link_id, session)
 
-#     if tag_ids is not None:
-#         # Delete old tag associations
-#         statement = delete(ReportTag).where(ReportTag.report_id == report_id)
-#         session.exec(statement)
-        
-#         # Add new tag associations
-#         id_list = [int(t_id.strip()) for t_id in tag_ids.split(",") if t_id.strip()]
-#         for t_id in id_list:
-#             new_link = ReportTag(report_id=report_id, tag_id=t_id)
-#             session.add(new_link)
+@router.get("/report-datasets", response_model=List[ReportDatasetNestedRead])
+def get_all_report_datasets(session: Session = Depends(get_session)):
+    statement = (
+        select(ReportDataset)
+        .options(selectinload(ReportDataset.dataset))
+    )
 
-#     session.add(db_report)
-#     session.commit()
-#     session.refresh(db_report)
-#     return db_report
+    links = session.exec(statement).all()
 
-
-
-
-# @router.post("/report/tag/")
-# def create_report_tag(report_tag_create:ReportTagCreate,session:Session=Depends(get_session))->ReportTagRead:
-#     db = ReportTag.model_validate(report_tag_create.model_dump(),context={'session':session,'model_class':ReportTag})
-#     session.add(db)
-#     session.commit()
-#     session.refresh(db)
-#     return db
-
-# @router.get("/report/tag/{report_id}")
-# def get_report_tag_by_report_id(report_id:int,session:Session=Depends(get_session))->ReportTagRead:
-#     result = session.exec(select(ReportTag).where(ReportTag.report_id== report_id)).first()
-#     return result
-
-
-# @router.put("/report/tag/{report_tag_id}")
-# def update_report_tag(report_tag_id:int,report_tag_update:ReportTagUpdate,session:Session=Depends(get_session))->ReportTagRead:
-#     db = session.get(ReportTag,report_tag_id)
-#     if not db:
-#         raise HTTPException(status_code=400,detail='report tag not found')
-#     update_data = report_tag_update.model_dump(exclude_unset=True)
-#     for key,value in update_data.items():
-#         setattr(db,key,value)
-#     session.add(db)
-#     session.commit()
-#     session.refresh(db)
-#     return db
-
- 
-
-
-
-
-
-
+    return links

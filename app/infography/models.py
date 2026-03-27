@@ -30,9 +30,6 @@ def generate_unique_slug(name: str, session: Session, model) -> str:
 
         slug = f"{base_slug}-{generate_random_string(4)}"
 
-
-
-
 class BaseModel(SQLModel):
     id: Optional[int] = Field(default=None, primary_key=True)
     slug: Optional[str] = Field(default=None, index=True, sa_column_kwargs={"unique": True})
@@ -159,12 +156,18 @@ class Report(BaseModel, table=True):
     description: str = Field(sa_column=Column(Text))
     content: str = Field(sa_column=Column(Text))
 
-    # One-to-Many Category
+    # Category
     category_id: Optional[int] = Field(default=None, foreign_key="category.id")
     category: Optional[Category] = Relationship(back_populates="reports")
 
-    # Many-to-Many Tags
+    # Tags
     tag_links: List["ReportTag"] = Relationship(back_populates="report")
+
+    # Topics
+    topics: List["ReportTopic"] = Relationship(back_populates="report")
+
+    # Datasets
+    dataset_links: List["ReportDataset"] = Relationship(back_populates="report")
 
 
 class ReportCreate(SQLModel):
@@ -181,6 +184,74 @@ class ReportRead(SQLModel):
     content: str
     slug: str
     is_active: bool
+
+# models for reportTopic
+
+class ReportTopic(BaseModel, table=True):
+    name: str = Field(index=True)
+    topic_content: str = Field(sa_column=Column(Text))
+
+    report_id: Optional[int] = Field(default=None, foreign_key="report.id")
+
+    report: Optional["Report"] = Relationship(back_populates="topics")
+
+    graphs: List["ReportGraph"] = Relationship(back_populates="topic")
+
+class ReportTopicCreate(SQLModel):
+    name: str
+    topic_content: str
+    report_id: int
+
+class ReportTopicRead(SQLModel):
+    id: int
+    name: str
+    topic_content: str
+
+
+# models for reportGraph
+
+class ReportGraph(BaseModel, table=True):
+    title: str = Field(index=True)
+    report_topic_id: Optional[int] = Field(default=None,foreign_key="reporttopic.id")
+    chart_config: Optional[str] = Field(default=None,sa_column=Column(Text))
+    dataset_id: Optional[int] = Field(default=None, foreign_key="dataset.id")
+    topic: Optional["ReportTopic"] = Relationship(back_populates="graphs")
+    dataset: Optional["Dataset"] = Relationship()
+
+class ReportGraphCreate(SQLModel):
+    title: str
+    report_topic_id: int
+    chart_config: Optional[str]
+    dataset_id: Optional[int] = None
+
+class ReportGraphRead(SQLModel):
+    id: int
+    title: str
+    report_topic_id:int
+    chart_config: Optional[str]
+    dataset_id: Optional[int]
+
+
+# models for ReportDataset
+
+class ReportDataset(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    
+    dataset_id: Optional[int] = Field(default=None, foreign_key="dataset.id")
+    report_id: Optional[int] = Field(default=None, foreign_key="report.id")
+
+    dataset: Optional[Dataset] = Relationship()
+    report: Optional[Report] = Relationship(back_populates="dataset_links")
+
+
+class ReportDatasetCreate(SQLModel):
+    dataset_id: int
+    report_id: int
+
+class ReportDatasetRead(SQLModel):
+    id: int
+    report_id: int
+    dataset_id:int
 
 
 # models for report tag
@@ -224,11 +295,53 @@ class DatasetNestedRead(SQLModel):
     description: str
     slug: str
     file_path: Optional[str]
+    is_active:bool
 
     category: Optional[CategoryNestedRead]
     tag_links: List[DatasetTagNestedRead]
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
+
+
+# class ReportNestedRead(SQLModel):
+#     id: int
+#     name: str
+#     description: str
+#     content: str
+#     slug: str
+
+#     category: Optional[CategoryNestedRead]
+#     tag_links: List[ReportTagNestedRead]
+#     created_at: Optional[datetime]
+#     updated_at: Optional[datetime]
+
+
+class ReportGraphNestedRead(SQLModel):
+    id: int
+    title: str
+    chart_config: Optional[str]
+    dataset: Optional[DatasetNestedRead]
+
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
+
+
+class ReportTopicNestedRead(SQLModel):
+    id: int
+    name: str
+    report_id:int
+    topic_content: str
+
+    graphs: List[ReportGraphNestedRead]
+
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
+
+class ReportDatasetNestedRead(SQLModel):
+    id: int
+    dataset_id:int
+    report_id:int
+    dataset: DatasetNestedRead
 
 
 class ReportNestedRead(SQLModel):
@@ -239,6 +352,12 @@ class ReportNestedRead(SQLModel):
     slug: str
 
     category: Optional[CategoryNestedRead]
+
     tag_links: List[ReportTagNestedRead]
+
+    topics: List[ReportTopicNestedRead]
+
+    dataset_links: List[ReportDatasetNestedRead]
+
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
