@@ -32,3 +32,5 @@ build/
 
 uploads/
 uploads/**
+parquet_data/
+parquet_data/**
