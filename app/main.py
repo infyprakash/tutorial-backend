@@ -40,7 +40,7 @@ app.mount(
     name="uploads"
 )
 
-app = FastAPI(lifespan=lifespan)
+# app = FastAPI(lifespan=lifespan)
 
 app.include_router(tutorial_router.router)
 app.include_router(account_router.router)
